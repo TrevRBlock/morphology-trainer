@@ -1,0 +1,14 @@
+MORPHOLOGY TRAINER V2
+
+Repository name:
+morphology-trainer
+
+Run:
+npm.cmd install
+npm.cmd run dev
+
+Build:
+npm.cmd run build
+
+GitHub Pages base path:
+/morphology-trainer/

@@ -1,0 +1,8 @@
+Total questions: 180
+Unique words: 180
+
+Simple: 30
+Derivational only: 50
+Inflectional only: 50
+Derivational + inflectional: 35
+Multiple derivational affixes: 15
