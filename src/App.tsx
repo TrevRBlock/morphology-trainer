@@ -1,7 +1,9 @@
 import {
   useEffect,
-  useMemo,
   useState,
+} from "react";
+import type {
+  ChangeEvent,
 } from "react";
 import "./App.css";
 import {
@@ -10,7 +12,6 @@ import {
 import type {
   AffixKind,
   MorphologyQuestion,
-  QuestionCategory,
 } from "./questionData";
 
 type ComplexityAnswer =
@@ -25,18 +26,11 @@ interface HistoryEntry {
   correctComplexity:
     ComplexityAnswer;
   correctAffixes: string[];
+  classificationEnabled:
+    boolean;
   isCorrect: boolean;
   submittedAt: string;
 }
-
-const categories:
-  QuestionCategory[] = [
-    "Simple",
-    "Derivational only",
-    "Inflectional only",
-    "Derivational + inflectional",
-    "Multiple derivational affixes",
-  ];
 
 const complexityChoices:
   ComplexityAnswer[] = [
@@ -51,7 +45,10 @@ const affixKinds:
   ];
 
 const HISTORY_KEY =
-  "morphology-trainer-history-v3";
+  "morphology-trainer-history-v4";
+
+const CLASSIFICATION_KEY =
+  "morphology-trainer-di-identification-v4";
 
 function loadHistory():
   HistoryEntry[] {
@@ -69,27 +66,27 @@ function loadHistory():
   }
 }
 
-function getAvailableQuestions(
-  enabledCategories:
-    readonly QuestionCategory[],
-): MorphologyQuestion[] {
-  return questions.filter(
-    (question) =>
-      enabledCategories.includes(
-        question.category,
-      ),
-  );
+function loadClassificationSetting():
+  boolean {
+  try {
+    const saved =
+      localStorage.getItem(
+        CLASSIFICATION_KEY,
+      );
+
+    return saved === null
+      ? true
+      : saved === "true";
+  } catch {
+    return true;
+  }
 }
 
 function getRandomQuestion(
-  enabledCategories:
-    readonly QuestionCategory[],
   excludedId?: number,
-): MorphologyQuestion | null {
+): MorphologyQuestion {
   let available =
-    getAvailableQuestions(
-      enabledCategories,
-    );
+    questions;
 
   if (
     excludedId !== undefined &&
@@ -101,10 +98,6 @@ function getRandomQuestion(
           question.id !==
           excludedId,
       );
-  }
-
-  if (available.length === 0) {
-    return null;
   }
 
   return available[
@@ -169,32 +162,20 @@ function getBreakdown(
 
 function App() {
   const [
-    enabledCategories,
-    setEnabledCategories,
-  ] =
-    useState<QuestionCategory[]>(
-      () => [...categories],
-    );
+    classificationEnabled,
+    setClassificationEnabled,
+  ] = useState(
+    () =>
+      loadClassificationSetting(),
+  );
 
   const [
     currentQuestion,
     setCurrentQuestion,
   ] =
     useState<MorphologyQuestion>(
-      () => {
-        const initial =
-          getRandomQuestion(
-            categories,
-          );
-
-        if (!initial) {
-          throw new Error(
-            "No morphology questions are available.",
-          );
-        }
-
-        return initial;
-      },
+      () =>
+        getRandomQuestion(),
     );
 
   const [
@@ -217,11 +198,13 @@ function App() {
     setSubmitted,
   ] = useState(false);
 
-  const [score, setScore] =
-    useState({
-      correct: 0,
-      total: 0,
-    });
+  const [
+    score,
+    setScore,
+  ] = useState({
+    correct: 0,
+    total: 0,
+  });
 
   const [
     history,
@@ -237,14 +220,14 @@ function App() {
     );
   }, [history]);
 
-  const availableCount =
-    useMemo(
-      () =>
-        getAvailableQuestions(
-          enabledCategories,
-        ).length,
-      [enabledCategories],
+  useEffect(() => {
+    localStorage.setItem(
+      CLASSIFICATION_KEY,
+      String(
+        classificationEnabled,
+      ),
     );
+  }, [classificationEnabled]);
 
   const correctComplexity:
     ComplexityAnswer =
@@ -258,6 +241,7 @@ function App() {
     "Complex";
 
   const showClassificationTask =
+    classificationEnabled &&
     !submitted &&
     isActuallyComplex &&
     complexityAnswer ===
@@ -276,6 +260,7 @@ function App() {
     correctComplexity;
 
   const classificationsCorrect =
+    !classificationEnabled ||
     !isActuallyComplex ||
     currentQuestion.affixes.every(
       (item, index) =>
@@ -291,30 +276,24 @@ function App() {
   const canSubmit =
     complexityAnswer !== null &&
     (
+      !classificationEnabled ||
       complexityAnswer ===
         "Simple" ||
       !isActuallyComplex ||
       allAffixesClassified
     );
 
-  function toggleCategory(
-    category:
-      QuestionCategory,
+  function setClassificationMode(
+    enabled: boolean,
   ) {
-    setEnabledCategories(
-      (previous) =>
-        previous.includes(
-          category,
-        )
-          ? previous.filter(
-              (item) =>
-                item !== category,
-            )
-          : [
-              ...previous,
-              category,
-            ],
+    if (submitted) {
+      return;
+    }
+
+    setClassificationEnabled(
+      enabled,
     );
+    setClassifications({});
   }
 
   function chooseComplexity(
@@ -337,7 +316,10 @@ function App() {
     index: number,
     kind: AffixKind,
   ) {
-    if (submitted) {
+    if (
+      submitted ||
+      !classificationEnabled
+    ) {
       return;
     }
 
@@ -364,9 +346,11 @@ function App() {
       (previous) => ({
         correct:
           previous.correct +
-          (overallCorrect
-            ? 1
-            : 0),
+          (
+            overallCorrect
+              ? 1
+              : 0
+          ),
         total:
           previous.total + 1,
       }),
@@ -386,6 +370,7 @@ function App() {
             currentQuestion.affixes.map(
               (item) => item.form,
             ),
+          classificationEnabled,
           isCorrect:
             overallCorrect,
           submittedAt:
@@ -399,16 +384,8 @@ function App() {
   function nextQuestion() {
     const next =
       getRandomQuestion(
-        enabledCategories,
         currentQuestion.id,
       );
-
-    if (!next) {
-      alert(
-        "Select at least one question category.",
-      );
-      return;
-    }
 
     setCurrentQuestion(next);
     setComplexityAnswer(null);
@@ -447,143 +424,136 @@ function App() {
     <div className="app-layout">
       <aside className="sidebar">
         <p className="eyebrow">
-          Practice filters
+          Practice options
         </p>
 
         <h2>
-          Choose question types
+          Choose the analysis level
         </h2>
 
-        <div className="filter-count">
+        <div className="bank-summary">
           <strong>
-            {
-              enabledCategories
-                .length
-            }
+            {questions.length}
           </strong>
 
           <span>
-            of {categories.length}
-            categories active
+            words are always active
           </span>
         </div>
 
-        <p className="available-count">
-          {availableCount} of{" "}
-          {questions.length} words
-          available
-        </p>
+        <section
+          className={`mode-card ${
+            classificationEnabled
+              ? "active"
+              : ""
+          }`}
+        >
+          <div className="mode-card-heading">
+            <div>
+              <p>
+                D/I identification
+              </p>
 
-        <div className="filter-actions">
-          <button
-            type="button"
-            onClick={() =>
-              setEnabledCategories(
-                [...categories],
-              )
-            }
-          >
-            Select all
-          </button>
+              <h3>
+                Derivational or
+                inflectional
+              </h3>
+            </div>
 
-          <button
-            type="button"
-            onClick={() =>
-              setEnabledCategories(
-                [],
-              )
+            <label className="mode-switch">
+              <input
+                type="checkbox"
+                checked={
+                  classificationEnabled
+                }
+                disabled={submitted}
+                onChange={(
+                  event:
+                    ChangeEvent<HTMLInputElement>,
+                ) =>
+                  setClassificationMode(
+                    event.target.checked,
+                  )
+                }
+              />
+
+              <span
+                className="mode-switch-control"
+                aria-hidden="true"
+              />
+
+              <span className="mode-switch-label">
+                {
+                  classificationEnabled
+                    ? "On"
+                    : "Off"
+                }
+              </span>
+            </label>
+          </div>
+
+          <p className="mode-description">
+            {
+              classificationEnabled
+                ? "Students identify whether each displayed affix is derivational or inflectional."
+                : "Students identify only whether the word is simple or complex. Affix types are hidden and are not graded."
             }
-          >
-            Clear all
-          </button>
+          </p>
+        </section>
+
+        <div className="current-mode">
+          <span>
+            Current mode
+          </span>
+
+          <strong>
+            {
+              classificationEnabled
+                ? "Simple/Complex + D/I"
+                : "Simple/Complex only"
+            }
+          </strong>
         </div>
 
         {
-          enabledCategories.length ===
-            0 && (
-            <p className="warning">
-              Select at least one
-              category.
-            </p>
+          classificationEnabled ? (
+            <div className="sidebar-note">
+              <strong>
+                Derivational
+              </strong>
+
+              <p>
+                Creates a new lexeme or
+                changes lexical meaning
+                or category.
+              </p>
+
+              <strong>
+                Inflectional
+              </strong>
+
+              <p>
+                Adds grammatical
+                information without
+                creating a new lexeme.
+              </p>
+            </div>
+          ) : (
+            <div className="sidebar-note introductory-note">
+              <strong>
+                Introductory mode
+              </strong>
+
+              <p>
+                The task stops after
+                identifying whether the
+                word contains one
+                morpheme or more than
+                one morpheme.
+              </p>
+            </div>
           )
         }
-
-        <div className="filter-list">
-          {categories.map(
-            (category) => {
-              const enabled =
-                enabledCategories.includes(
-                  category,
-                );
-
-              const count =
-                questions.filter(
-                  (question) =>
-                    question.category ===
-                    category,
-                ).length;
-
-              return (
-                <label
-                  className={`filter-option ${
-                    enabled
-                      ? "active"
-                      : ""
-                  }`}
-                  key={category}
-                >
-                  <input
-                    type="checkbox"
-                    checked={enabled}
-                    onChange={() =>
-                      toggleCategory(
-                        category,
-                      )
-                    }
-                  />
-
-                  <span className="check">
-                    {enabled
-                      ? "✓"
-                      : ""}
-                  </span>
-
-                  <span>
-                    <strong>
-                      {category}
-                    </strong>
-
-                    <small>
-                      {count} words
-                    </small>
-                  </span>
-                </label>
-              );
-            },
-          )}
-        </div>
-
-        <div className="sidebar-note">
-          <strong>
-            Derivational
-          </strong>
-
-          <p>
-            Creates a new lexeme or
-            changes lexical meaning or
-            category.
-          </p>
-
-          <strong>
-            Inflectional
-          </strong>
-
-          <p>
-            Adds grammatical
-            information without
-            creating a new lexeme.
-          </p>
-        </div>
       </aside>
 
       <main className="app">
@@ -600,9 +570,11 @@ function App() {
             <p>
               Decide whether the word
               is simple or complex.
-              For complex words,
-              classify each displayed
-              affix.
+              {
+                classificationEnabled
+                  ? " For complex words, classify each displayed affix."
+                  : " Affix-type identification is currently disabled."
+              }
             </p>
           </div>
 
@@ -822,15 +794,27 @@ function App() {
                 : "incorrect"
             }`}
           >
-            <p className="section-kicker">
-              Analysis result
-            </p>
+            <div className="feedback-heading">
+              <div>
+                <p className="section-kicker">
+                  Analysis result
+                </p>
 
-            <h2>
-              {overallCorrect
-                ? "Correct"
-                : "Incorrect"}
-            </h2>
+                <h2>
+                  {overallCorrect
+                    ? "Correct"
+                    : "Incorrect"}
+                </h2>
+              </div>
+
+              <span className="feedback-mode">
+                {
+                  classificationEnabled
+                    ? "D/I included"
+                    : "D/I not graded"
+                }
+              </span>
+            </div>
 
             <p className="result-summary">
               <strong>
@@ -879,13 +863,18 @@ function App() {
                           )
                         ];
 
+                      const articleClass =
+                        !classificationEnabled
+                          ? "ungraded-affix"
+                          : selectedKind ===
+                            item.kind
+                            ? "correct-affix"
+                            : "incorrect-affix";
+
                       return (
                         <article
                           className={
-                            selectedKind ===
-                            item.kind
-                              ? "correct-affix"
-                              : "incorrect-affix"
+                            articleClass
                           }
                           key={`${item.form}-${index}`}
                         >
@@ -902,10 +891,16 @@ function App() {
                           </div>
 
                           <p>
-                            <b>
-                              {item.kind}
-                            </b>
-                            :{" "}
+                            {
+                              classificationEnabled && (
+                                <>
+                                  <b>
+                                    {item.kind}
+                                  </b>
+                                  :{" "}
+                                </>
+                              )
+                            }
                             {item.function}.
                           </p>
                         </article>
@@ -916,7 +911,9 @@ function App() {
 
                 <p className="analysis-note">
                   {
-                    currentQuestion.note
+                    classificationEnabled
+                      ? currentQuestion.note
+                      : "Affix types were not included in this attempt."
                   }
                 </p>
               </div>
@@ -1014,6 +1011,17 @@ function App() {
                       <b>
                         {
                           entry.correctComplexity
+                        }
+                      </b>
+                    </p>
+
+                    <p>
+                      Mode:{" "}
+                      <b>
+                        {
+                          entry.classificationEnabled
+                            ? "Simple/Complex + D/I"
+                            : "Simple/Complex only"
                         }
                       </b>
                     </p>
